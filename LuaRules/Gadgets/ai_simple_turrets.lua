@@ -1,9 +1,9 @@
 function gadget:GetInfo()
     return {
-        name    = "MyFirstAI",
-        desc    = "An AI that knows how to play Mod X",
-        author  = "John Doe",
-        date    = "2020-12-31",
+        name    = "Tanks AI",
+        desc    = "An simple Cyclops spammer",
+        author  = "dyth68",
+        date    = "2023-01-23",
         license = "Public Domain",
         layer   = 83,
         enabled = true
@@ -15,11 +15,13 @@ end
 -- magic numbers bad
 -- Don't excess
 -- Dedup fusion
+-- Retreat zones not working
 ------------------------------------------------------------
 -- Other strats:
 -- Cloak
 -- 1 con naked expand and 1 con 4 solars
 -- Glaive swarm rampages, avoid enemy unless overwhelm
+
 ------------------------------------------------------------
 -- Team AIs:
 -- Just eco (grid, singu)
@@ -27,6 +29,20 @@ end
 -- Silo - rushes silo and uses Widow/Owl to scout. Hits statics with eos, unshielded clusters (definition?) with inferno, hits antis with Shockley if loaded nuke available
 -- Air - goes owl -> swift x2 -> Raven -> Phoenix. Employs threat zones to avoid AA
 -- Nuke - rushes nuke, then makes airfac (or plate if possible) and then swift scouts for anti. Will scout when nuke is built and will fire at largest undefended area. If none over 5k exists then will wait until one does and scout again in another 4-5 mins
+-- Frontliner - Makes skirms and a few riots. Goes where there isn't a friendly Defender or Shieldball. Pressures and avoids stingers
+-- Interceptor - Makes glaives along front line, attempts to intercept smaller groups of raiders or hit undefended skirms and assaults
+-- Sneak - Rushes Athena, will attempt to rez anything not in range of AA or on front. Will then attempt to sneak to some back area that does not have anything else in visual range, sink an Iris and then make a Djinn, which will pull in interceptor and ravager
+-- Ravager - Makes ravager swarms, attempting to attack lightly defended areas. Will build up 5 for first run, then doubles size each time
+-- Shieldball - Makes Felon->4 Thug->Outlaw->Aspis. Outlaw at enemy-facing part of ball. Retreats when shield is under 1/2 of total. Will make lobfac (or plate) and use lobster to retreat at >4000m. Will upgrade to second lobster for attack and retreat.
+-- Snitch - Will make Snitch and Iris. Tries to find balls of enemy units and kill them
+-- Arti-king - Makes Mace->Lance->Halberd. Scouts with buttoned down Halberd. Has Mace near Lance
+
+------------------------------------------------------------
+-- Standard behaviours:
+-- Basic eco - takes mexes and makes one solar next to each
+-- Area avoidance - Manages areas to avoid
+--- Cerberus, desolator, lucifer avoidance - Avoids range of these things
+-- Pathfinding cancelling - States whether a location is reachable and cancels impossible orders
 
 
 include("LuaRules/Configs/customcmds.h.lua")
@@ -125,7 +141,7 @@ function gadget:UnitCreated(unitID, unitDefID, teamId)
 		initializeTeams()
 	end
 	if not (teamdata[teamId] == nil) and conDefs[unitDefID] then
-		Echo("is con")
+		--Echo("is con")
 		--printThing("teamdata", teamdata, "")
 		teamdata[teamId].cons[unitID] = true
 	end
@@ -203,7 +219,7 @@ local function placeFac(facDefID, teamId)
 			--startpos = {xx, zz}
 			--printThing("startpos", thisTeamData.startpos, "")
 			--printThing("teamdata", thisTeamData, "")
-			printThing("teamdataAll", teamdata, "")
+			--printThing("teamdataAll", teamdata, "")
 			spSendLuaRulesMsg('sethaven|' .. xx .. '|' .. yy .. '|' .. zz )
 		end
 	end
@@ -314,7 +330,7 @@ local function oldWelderOrders(teamId, cmdQueue, unitId, thisTeamData)
 	local startpos = thisTeamData.startpos
 
 	if sqDistance(x,z, startpos[1], startpos[2]) < 1000000 then
-		Echo("new con orders")
+		--Echo("new con orders")
 		newWelderOrders(teamId, unitId, thisTeamData)
 	end
 	local adjustdX, adjustedZ = x + math.random(-100, 100), z + math.random(-100, 100) -- Slight bunching reduction
@@ -465,10 +481,10 @@ function gadget:GameFrame(frame)
 				end
 			end
 			for _,unitId in ipairs(spGetTeamUnitsByDefs(teamId, caretakerDefID)) do
-				Echo("Found caretaker")
+				--Echo("Found caretaker")
 				local cmdNum = spGetUnitCommands(unitId, 0)
 				if cmdNum == 0 then
-					Echo("Giving caretaker order")
+					--Echo("Giving caretaker order")
 					local x, y, z = spGetUnitPosition(unitId)
 					spGiveOrderToUnit(unitId, CMD.PATROL, {x+100, y, z+100}, 0)
 				end

@@ -48,12 +48,12 @@ return {
     desc = 'A chicken experience customizable using modoptions'
   },
   {
-    name = 'MyFirstAI',
-    desc = 'Maybe it will win?'
+    name = 'Tanks AI (Normal)',
+    desc = 'A Tank focused AI'
   },
   {
-    name = 'MyFirstAI (Hard)',
-    desc = 'Maybe it will win?'
+    name = 'Economist AI',
+    desc = 'Just builds up its economy (for team games)'
   },
   {
 	name ='Null AI',

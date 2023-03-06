@@ -362,6 +362,27 @@ local function GetClosestBuildableMetalSpot(x, z, teamId) --is used by single me
     return bestSpot, sqrt(bestDist), bestIndex
 end
 
+-- TODO: Combine with above
+local function GetClosestBuildableMetalSpots(x, z, teamId) --is used by single mex placement, not used by areamex
+    local spotData = {}
+    local index = 1
+    for i = 1, #metalSpots do
+        local spot = metalSpots[i]
+        local dx, dz = x - spot.x, z - spot.z
+        local dist = dx*dx + dz*dz
+        if IsSpotBuildable(i, teamId) then
+            spotData[index] = {
+                bestSpot = spot,
+                bestDist = dist,
+                bestIndex = i
+            }
+            index = index + 1
+        end
+    end
+    table.sort(spotData, function (k1, k2) return k1.bestDist < k2.bestDist end )
+    return spotData
+end
+
 local function IntegrateMetal(x, z, forceUpdate)
     local newCenterX, newCenterZ
 
@@ -781,4 +802,4 @@ function theUpdate()
     end
 end
 
-return ai_lib_UnitDestroyed, ai_lib_UnitCreated, ai_lib_UnitGiven, ai_lib_Initialize, ai_lib_GameFrame, sqDistance, HandleAreaMex, GetMexSpotsFromGameRules, GetClosestBuildableMetalSpot
+return ai_lib_UnitDestroyed, ai_lib_UnitCreated, ai_lib_UnitGiven, ai_lib_Initialize, ai_lib_GameFrame, sqDistance, HandleAreaMex, GetMexSpotsFromGameRules, GetClosestBuildableMetalSpot, GetClosestBuildableMetalSpots
