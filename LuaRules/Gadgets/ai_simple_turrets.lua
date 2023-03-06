@@ -376,7 +376,7 @@ local addons = { -- coordinates of solars for the Ctrl Alt modifier key, indexed
 -- Functions
 ------------------------------------------------------------
 
-local function Distance(x1,z1,x2,z2)
+local function sqDistance(x1,z1,x2,z2)
 	local dis = (x1-x2)*(x1-x2)+(z1-z2)*(z1-z2)
 	return dis
 end
@@ -548,8 +548,8 @@ function HandleAreaMex(cmdID, cx, cy, cz, cr, cmdOpts, units)
 	for i = 1, #metalSpots do
 		local mex = metalSpots[i]
 		--if (mex.x > xmin) and (mex.x < xmax) and (mex.z > zmin) and (mex.z < zmax) then -- square area, should be faster
-		if (Distance(cx, cz, mex.x, mex.z) < cr*cr) and (makeMexEnergy or (terraMode and not burryMode) or IsSpotBuildable(i, teamId)) then -- circle area, slower
-			commands[#commands+1] = {x = mex.x, z = mex.z, d = Distance(aveX,aveZ,mex.x,mex.z)}
+		if (sqDistance(cx, cz, mex.x, mex.z) < cr*cr) and (makeMexEnergy or (terraMode and not burryMode) or IsSpotBuildable(i, teamId)) then -- circle area, slower
+			commands[#commands+1] = {x = mex.x, z = mex.z, d = sqDistance(aveX,aveZ,mex.x,mex.z)}
 		end
 	end
 
@@ -561,7 +561,7 @@ function HandleAreaMex(cmdID, cx, cy, cz, cr, cmdOpts, units)
 		aveZ = commands[1].z
 		taremove(commands, 1)
 		for k, com in pairs(commands) do
-			com.d = Distance(aveX,aveZ,com.x,com.z)
+			com.d = sqDistance(aveX,aveZ,com.x,com.z)
 		end
 		noCommands = noCommands-1
 	end
@@ -1017,10 +1017,10 @@ local function placeFac(facDefID, teamId)
 	end
 end
 
-local function isXInRange(teamId, x, z, radius, unitDefID)
+local function isXInRange(teamId, x, z, radius, unitDefID, beingBuiltCounts)
 	local inRangeUnits = spGetUnitsInCylinder (x, z, radius, teamId)
 	for _, unitId in pairs(inRangeUnits) do
-		if spGetUnitDefID(unitId) == unitDefID and not isBeingBuilt(unitId) then
+		if spGetUnitDefID(unitId) == unitDefID and (beingBuiltCounts or not isBeingBuilt(unitId)) then
 			return true
 		end
 	end
@@ -1043,7 +1043,7 @@ local function newConOrders(teamId, unitId, data)
 		return
 	end
 	--Echo("Storage " .. storage)
-	if storage < HIDDEN_STORAGE + 100 then
+	if storage < HIDDEN_STORAGE + 100 and not isXInRange(teamId, facX, facZ, 9000, storageDefID, true)  then
 		local xx = x - 100
 		local zz = z
 		local yy = math.max(0, spGetGroundHeight(xx, zz))
@@ -1081,8 +1081,8 @@ local function newConOrders(teamId, unitId, data)
 		end
 	end
 	-- Make lotus
-	if (spGetTeamUnitDefCount(teamId, welderDefID) > 1) and not isXInRange(teamId, facX, facZ, 200, lotusDefID) then
-		buildCloseTo(unitId, lotusDefID, x + 100, y, z - 150)
+	if (spGetTeamUnitDefCount(teamId, welderDefID) > 1) and not isXInRange(teamId, facX, facZ, 200, lotusDefID, true) then
+		buildCloseTo(unitId, lotusDefID, facX + 100, y, facZ - 150)
 		return
 	end
 	--fusion building
@@ -1121,12 +1121,12 @@ local function oldConOrders(teamId, cmdQueue, unitId, thisTeamData)
 
 	local startpos = thisTeamData.startpos
 
-	if Distance(x,z, startpos[1], startpos[2]) < 1000 then
+	if sqDistance(x,z, startpos[1], startpos[2]) < 1000000 then
 		Echo("new con orders")
-		newConOrders(teamId, unitId, data)
+		newConOrders(teamId, unitId, thisTeamData)
 	end
-
-	local spot = GetClosestBuildableMetalSpot(x, z, teamId)
+	local adjustdX, adjustedZ = x + math.random(-100, 100), z + math.random(-100, 100) -- Slight bunching reduction
+	local spot = GetClosestBuildableMetalSpot(adjustdX, adjustedZ, teamId)
 	-- Always reclaim
 	if hard then
 		spGiveOrderToUnit(unitId, 90, {x, y, z, 300}, {shift=true})
@@ -1173,6 +1173,7 @@ local function factoryOrders(teamId, unitId, frame)
 		if (spGetFactoryCommands(unitId, 0) == 2) and ((spGetTeamUnitDefCount(teamId, welderDefID) > 10) or (income > 50) or frame > 30 * 60 * 6) then  -- Cyclops at 6 minutes
 			spGiveOrderToUnit(unitId, -welderDefID, {}, {})
 			spGiveOrderToUnit(unitId, -welderDefID, {}, {})
+			spGiveOrderToUnit(unitId, -welderDefID, {}, {})
 			spGiveOrderToUnit(unitId, -cyclopsDefID, {}, {})
 		end
 	end
@@ -1183,10 +1184,10 @@ local function blitzOrders(unitId, data)
 	local cmdQueue = spGetUnitCommands(unitId, 2)
 	if (#cmdQueue == 0) then
 		local x, y, z = spGetUnitPosition(unitId)
-		--local startPosDist = Distance(x,z, thisTeamData.startpos[1], thisTeamData.startpos[2])
+		--local startPosDist = sqDistance(x,z, thisTeamData.startpos[1], thisTeamData.startpos[2])
 		local startpos = data.startpos
 		if startpos then
-			local startPosDist = Distance(x,z, startpos[1], startpos[2])
+			local startPosDist = sqDistance(x,z, startpos[1], startpos[2])
 			if startPosDist > 100000 or (health > maxhealth * 0.95) then
 				local enemyUnit = spGetUnitNearestEnemy(unitId, 9999, true)
 				--local xx, yy, zz = Game.mapSizeX - thisTeamData.startpos[1], 0, Game.mapSizeZ - thisTeamData.startpos[2]
@@ -1219,7 +1220,9 @@ local function blitzOrders(unitId, data)
 			local startpos = data.startpos
 			if startpos then
 				local xx, yy, zz = retreatPos(startpos)
-				spGiveOrderToUnit(unitId, CMD.MOVE, {xx, yy, zz}, 0)
+				if not #cmdQueue == 1 or (cmdQueue[1] and not cmdQueue[1].id == CMD.MOVE) then  -- TODO: Why the heck is the middle condition required?
+					spGiveOrderToUnit(unitId, CMD.MOVE, {xx, yy, zz}, 0)
+				end
 			else
 				Echo("No startpos :((")
 				--printThing("data", data, "")
