@@ -48,6 +48,10 @@ return {
     desc = 'A chicken experience customizable using modoptions'
   },
   {
+    name = 'MyFirstAI',
+    desc = 'Maybe it will win?'
+  },
+  {
 	name ='Null AI',
 	desc = 'Empty AI for testing purposes'
   }
