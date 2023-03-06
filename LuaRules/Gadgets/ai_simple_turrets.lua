@@ -13,7 +13,9 @@ end
 -- TODO 
 -- Stop mex spot cheating
 -- magic numbers bad
--- 
+-- deal with dead fac
+-- Ensure fac gets lotus
+-- Don't excess
 ------------------------------------------------------------
 
 include("LuaRules/Configs/customcmds.h.lua")
@@ -68,7 +70,11 @@ local spGetPositionLosState = Spring.GetPositionLosState
 local spGetTeamResources    = Spring.GetTeamResources
 local spGetUnitNearestEnemy = Spring.GetUnitNearestEnemy
 local spGetTeamUnitsByDefs  = Spring.GetTeamUnitsByDefs
+local spGetTeamUnitDefCount = Spring.GetTeamUnitDefCount
 local spGetUnitHealth       = Spring.GetUnitHealth
+local spGetUnitsInCylinder  = Spring.GetUnitsInCylinder
+local spGetFactoryCommands  = Spring.GetFactoryCommands
+local spTestBuildOrder      = Spring.TestBuildOrder
 
 local abs   = math.abs
 local floor = math.floor
@@ -281,7 +287,8 @@ local solarDefID = UnitDefNames["energysolar"].id
 local windDefID = UnitDefNames["energywind"].id
 local storageDefID = UnitDefNames["staticstorage"].id
 local cyclopsDefID = UnitDefNames["tankheavyassault"].id
-local welderDefId = 564
+local welderDefID = UnitDefNames["tankcon"].id
+local fusionDefID = UnitDefNames["energyfusion"].id
 local tankfacDefID = 410 -- UnitDefNames["factorytank"].id
 
 local mexUnitDef = UnitDefNames["staticmex"]
@@ -928,7 +935,10 @@ end
 function gadget:Initialize()
 	Echo("Initialize called")
 	GetMexSpotsFromGameRules()
-    for _,teamId in ipairs(Spring.GetTeamList()) do
+	if next(teamdata) == nil then
+		initializeTeams()
+	end
+    for teamId,_ in pairs(teamdata) do
 		local units = Spring.GetTeamUnits(teamId)
 		for i=1, #units do
 			local unitID = units[i].unitID
@@ -946,14 +956,13 @@ function buildCloseTo(unitId, buildId, x, y, z)
 	local yy = y
 	local zz = z
 	local i = 0
-	while (Spring.TestBuildOrder(buildId, xx, yy, zz, 0) == 0) and i < 10000 do
+	while (spTestBuildOrder(buildId, xx, yy, zz, 0) == 0) and i < 10000 do
 		local signx = (i%2 * 2) - 1
 		local signz = (floor(i/2)%2 * 2) - 1
 		xx = x + 10 * (i % 100) * signx
 		zz = z + 10 * (floor(i/100) % 100) * signz
 		yy = math.max(0, Spring.GetGroundHeight(xx, zz))
 		i = i + 1
-		Echo(xx .. " " .. yy .. " " .. zz)
 	end
 	if i > 100 then
 		Echo("ERROR! Could not place building!")
@@ -970,6 +979,8 @@ local function isBeingBuilt(unitId)
 	return buildProgress < 1
 end
 
+local hard = true
+local startpos = {}
 function gadget:GameFrame(frame)
     for teamId, data in pairs(teamdata) do
 		local thisTeamData = teamdata[teamId]
@@ -981,66 +992,89 @@ function gadget:GameFrame(frame)
 					local zz = z
 					local yy = math.max(0, Spring.GetGroundHeight(xx, zz))
 					buildCloseTo(unitId, tankfacDefID, xx, yy, zz)
-					thisTeamData.startpos = {xx, zz}
-					spGiveOrder(10001, {xx,yy,zz})
+					teamdata[teamId].startpos = {xx, zz}
+					startpos = {xx, zz}
+					printThing("startpos", thisTeamData.startpos, "")
+					printThing("teamdata", thisTeamData, "")
+					printThing("teamdataAll", teamdata, "")
 					Spring.SendLuaRulesMsg('sethaven|' .. xx .. '|' .. yy .. '|' .. zz )
 				end
 			end
 		else
+			-- Constructors and factories
 			for unitId,_ in pairs(data.cons) do
 				local cmdQueue = spGetUnitCommands(unitId, 2)
 				if not isBeingBuilt(unitId) then
 					if (#cmdQueue == 0) then
-						local x, y, z = Spring.GetUnitPosition(unitId)
+						local x, y, z = spGetUnitPosition(unitId)
 						local unitDef = spGetUnitDefID(unitId)
+						-- Factories
 						if unitDef == tankfacDefID then
-							if Spring.GetFactoryCommands(unitId, 0) == 0 then
-								spGiveOrderToUnit(unitId, -welderDefId, {}, {})
+							if spGetFactoryCommands(unitId, 0) == 0 then
+								spGiveOrderToUnit(unitId, -welderDefID, {}, {})
 								spGiveOrderToUnit(unitId, 115, {1}, {}) -- repeat build
 								spGiveOrderToUnit(unitId, 34220, {0}, {}) -- priority low
 							end
 							if frame > 3000 then
 								local current, _, _, income = spGetTeamResources(teamId, "metal")
-								if current > 100 then
+								if current > 200 then
 									spGiveOrderToUnit(unitId, 13921, {1}, {})
 								else
 									spGiveOrderToUnit(unitId, 13921, {0}, {})
 								end
-								if (Spring.GetFactoryCommands(unitId, 0) == 1) and (income > 30) then
-									spGiveOrderToUnit(unitId, -welderDefId, {}, {})
-									spGiveOrderToUnit(unitId, -welderDefId, {}, {})
-									spGiveOrderToUnit(unitId, -welderDefId, {}, {})
-									spGiveOrderToUnit(unitId, -welderDefId, {}, {})
+								if (spGetFactoryCommands(unitId, 0) == 1) and (spGetTeamUnitDefCount(teamId, welderDefID) > 8) and (income > 30) then
+									spGiveOrderToUnit(unitId, -welderDefID, {}, {})
+									spGiveOrderToUnit(unitId, -welderDefID, {}, {})
+									spGiveOrderToUnit(unitId, -welderDefID, {}, {})
+									spGiveOrderToUnit(unitId, -welderDefID, {}, {})
 									spGiveOrderToUnit(unitId, -cyclopsDefID, {}, {})
 								end
 							end
 						else
-							local spot = GetClosestBuildableMetalSpot(x, z, teamId)
-							if spot == nil then
-								local enemyUnit = spGetUnitNearestEnemy(unitId, 9999, true)
-								local xx, yy, zz = Spring.GetUnitPosition(enemyUnit)
-								spGiveOrderToUnit(unitId, CMD.MOVE, {xx, y, zz}, 0)
+							-- Constructors
+							-- First try heal nearby cyclops
+							local cyclopsToHeal
+							for _,cyclopsId in ipairs(spGetTeamUnitsByDefs(teamId, cyclopsDefID)) do
+								local health, maxhealth, _, _, buildProgress = spGetUnitHealth(cyclopsId)
+								if (health < maxhealth * 0.3) and buildProgress == 1 then
+									cyclopsToHeal = cyclopsId
+								end
+							end
+							if cyclopsToHeal and (unitId%2 == 1) then
+								spGiveOrderToUnit(unitId, 40, {cyclopsToHeal}, {right=true, coded=16}) -- repair
 							else
-								local xx = spot.x
-								local zz = spot.z
-								local yy = math.max(0, Spring.GetGroundHeight(xx, zz))
+								local spot = GetClosestBuildableMetalSpot(x, z, teamId)
+								-- Always reclaim
+								if hard then
+									spGiveOrderToUnit(unitId, 90, {x, y, z, 300}, {shift=true})
+								end
+								if spot == nil then
+									local enemyUnit = spGetUnitNearestEnemy(unitId, 9999, true)
+									local xx, yy, zz = Spring.GetUnitPosition(enemyUnit)
+									spGiveOrderToUnit(unitId, CMD.MOVE, {xx, yy, zz}, {shift=true})
+								else
+									local xx = spot.x
+									local zz = spot.z
+									local yy = math.max(0, Spring.GetGroundHeight(xx, zz))
 
-								HandleAreaMex(cmdID, xx, yy, zz, 100, {alt=true}, {unitId})
-								cmdQueue = spGetUnitCommands(unitId, 2)
-								if (#cmdQueue == 0) then
-									local startX,startY = thisTeamData.startpos
-									local spot = GetClosestBuildableMetalSpot(x, z, teamId)
-									--local unitX, unitZ =  unitVec((Game.mapSizeX - x) - x, (Game.mapSizeZ - z) - z)
-									xx = spot.x
-									zz = spot.z
-									yy = math.max(0, Spring.GetGroundHeight(xx, zz))
-									spGiveOrderToUnit(unitId, CMD.MOVE, {xx, y, zz}, 0)
+									HandleAreaMex(cmdID, xx, yy, zz, 100, {alt=true}, {unitId})
+									cmdQueue = spGetUnitCommands(unitId, 2)
+									if (#cmdQueue == 0) then
+										local startX,startY = thisTeamData.startpos
+										local spot = GetClosestBuildableMetalSpot(x, z, teamId)
+										--local unitX, unitZ =  unitVec((Game.mapSizeX - x) - x, (Game.mapSizeZ - z) - z)
+										xx = spot.x
+										zz = spot.z
+										yy = math.max(0, Spring.GetGroundHeight(xx, zz))
+										spGiveOrderToUnit(unitId, CMD.MOVE, {xx, y, zz},{shift=true})
+									end
 								end
 							end
 						end
 					end
 				else
-					local _, storage = spGetTeamResources(teamId, "metal")
+					-- Orders for under construction welders
+					local current, storage, _, income = spGetTeamResources(teamId, "metal")
 					--Echo("Storage " .. storage)
 					if storage < HIDDEN_STORAGE + 100 then
 						local x, y, z = Spring.GetUnitPosition(unitId)
@@ -1049,26 +1083,57 @@ function gadget:GameFrame(frame)
 						local yy = math.max(0, Spring.GetGroundHeight(xx, zz))
 
 						buildCloseTo(unitId, storageDefID, xx, yy, zz)
+					elseif (spGetTeamUnitDefCount(teamId, welderDefID) > 3) and (current > 300) then -- now sure why this is needed, but autoassist doesn't always work
+						-- Assist fac
+						for _,facId in ipairs(spGetTeamUnitsByDefs(teamId, tankfacDefID)) do
+							spGiveOrderToUnit(unitId, 25, {facId}, {right=true, coded=16})
+						end
+					else
+						--fusion building
+						local currentE, _, _, incomeE, expenseE = spGetTeamResources(teamId, "enery")
+						if hard and (unitId%4 == 0) and (income > 30) and ((incomeE - income < income) or currentE < 400) then
+							Echo("Building fusion")
+							local x, y, z = Spring.GetUnitPosition(unitId)
+							buildCloseTo(unitId, fusionDefID, x + 100, y, z - 250)
+						end
 					end
 				end
 			end
 			for _,unitId in ipairs(spGetTeamUnitsByDefs(teamId, cyclopsDefID)) do
-				local cmdQueue = spGetUnitCommands(unitId, 2)
-				if (#cmdQueue == 0) then
-					local enemyUnit = spGetUnitNearestEnemy(unitId, 9999, true)
-					local xx, yy, zz = Game.mapSizeX - thisTeamData.startpos[1], 0, Game.mapSizeZ - thisTeamData.startpos[2]
-					if enemyUnit then
-						xx, yy, zz = Spring.GetUnitPosition(enemyUnit)
+				if not isBeingBuilt(unitId) then
+					local health, maxhealth = spGetUnitHealth(unitId)
+					local cmdQueue = spGetUnitCommands(unitId, 2)
+					if (#cmdQueue == 0) then
+						local x, y, z = Spring.GetUnitPosition(unitId)
+						--local startPosDist = Distance(x,z, thisTeamData.startpos[1], thisTeamData.startpos[2])
+						local startPosDist = Distance(x,z, startpos[1], startpos[2])
+						if startPosDist > 100000 or (health > maxhealth * 0.95) then
+							local enemyUnit = spGetUnitNearestEnemy(unitId, 9999, true)
+							--local xx, yy, zz = Game.mapSizeX - thisTeamData.startpos[1], 0, Game.mapSizeZ - thisTeamData.startpos[2]
+							local xx, yy, zz = Game.mapSizeX - startpos[1], 0, Game.mapSizeZ - startpos[2]
+							yy = math.max(0, Spring.GetGroundHeight(xx, zz))
+							if enemyUnit then
+								xx, yy, zz = Spring.GetUnitPosition(enemyUnit)
+							end
+							spGiveOrderToUnit(unitId, CMD.FIGHT, {xx, yy, zz}, 0)
+						end
 					end
-					spGiveOrderToUnit(unitId, CMD.ATTACK, {xx, y, zz}, 0)
-				end
-				local health, maxhealth = spGetUnitHealth(unitId)
-				if (health < maxhealth * 0.3) then
-					local x, y, z = Spring.GetUnitPosition(unitId)
-					spGiveOrderToUnit(unitId, CMD.MOVE, {thisTeamData.startpos[1], 0, thisTeamData.startpos[2]}, 0)
-					local availableUnits = spGetUnitsInCylinder(x,z,500, teamId)
-					for _,unitId in ipairs(availableUnits) do
-						-- TODO do repairs
+					if hard then
+						--Echo("health " .. health)
+						if (health < maxhealth * 0.3) then
+							Echo("retreat time")
+							local x, y, z = Spring.GetUnitPosition(unitId)
+							--Echo("gadget name: " .. gadget:GetInfo().name )
+							--printThing("teamdataAll", teamdata, "")
+							--printThing("teamdata", thisTeamData, "")
+							--printThing("startpos", thisTeamData.startpos, "")
+							--printThing("startpos1", thisTeamData.startpos[1], "")
+							-- TODO: Pick better pos
+							--local xx, yy, zz = thisTeamData.startpos[1] - 100, 0, thisTeamData.startpos[2]
+							local xx, yy, zz = startpos[1] - 100, 0, startpos[2]
+							yy = math.max(0, Spring.GetGroundHeight(xx, zz))
+							spGiveOrderToUnit(unitId, CMD.MOVE, {xx, yy, zz}, 0)
+						end
 					end
 				end
 			end

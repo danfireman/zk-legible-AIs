@@ -1,8 +1,8 @@
 return {
-  name='Zero-K',
-  description='Zero-K',
-  shortname='ZK',
-  version='$VERSION',
+  name='simpleLegibleAI',
+  description='A simple Zero-K AI designed around legibility',
+  shortname='legibleAI',
+  version='v0.1.3-dev',
   mutator='1',
   game='Zero-K',
   shortGame='ZK',
