@@ -1,7 +1,7 @@
 function gadget:GetInfo()
     return {
         name    = "Tanks AI",
-        desc    = "An simple Cyclops spammer",
+        desc    = "A simple Cyclops spammer",
         author  = "dyth68",
         date    = "2023-01-23",
         license = "Public Domain",

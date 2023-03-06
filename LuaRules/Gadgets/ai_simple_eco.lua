@@ -1,7 +1,7 @@
 function gadget:GetInfo()
     return {
 		name    = "Economist AI",
-		desc    = "An simple Cyclops spammer",
+		desc    = "A simple economist AI",
 		author  = "dyth68",
 		date    = "2023-01-23",
 		license = "Public Domain",
@@ -12,8 +12,8 @@ function gadget:GetInfo()
 end
 ------------------------------------------------------------
 -- TODO 
--- Build close to should not build something already being build nearby, should instead assist
--- -- Define assist build
+-- High priority mexes and solars, use a reserve
+
 -- Consider current E plus under construction E
 -- Make grid
 -- Move build close to to lib
@@ -28,6 +28,8 @@ include("LuaRules/Configs/constants.lua")
 local hard = true
 
 local ai_lib_UnitDestroyed, ai_lib_UnitCreated, ai_lib_UnitGiven, ai_lib_Initialize, ai_lib_GameFrame, sqDistance, HandleAreaMex, GetMexSpotsFromGameRules, GetClosestBuildableMetalSpot, GetClosestBuildableMetalSpots = VFS.Include("LuaRules/Gadgets/ai_simple_lib.lua")
+local GetClosestPylonInGrid
+local SetPriorityState
 
 local storageDefID = UnitDefNames["staticstorage"].id
 local conjurerDefID = UnitDefNames["cloakcon"].id
@@ -68,7 +70,12 @@ local spGetTeamResources = Spring.GetTeamResources
 local spSendLuaRulesMsg = Spring.SendLuaRulesMsg
 local spGetTeamRulesParam = Spring.GetTeamRulesParam
 local spGetUnitIsDead = Spring.GetUnitIsDead
+local spGetUnitResources = Spring.GetUnitResources
+local spGetUnitRulesParam = Spring.GetUnitRulesParam
 
+local unitVec = Spring.Utilities.Vector.Unit
+
+local sqrt = math.sqrt
 ------------------------------------------------------------
 -- Debug
 ------------------------------------------------------------
@@ -92,6 +99,7 @@ end
 local MEXER = "mexer"
 local GRIDDER = "grider"
 local E_MAKER = "emaker"
+local pylonRadius = 500 -- TODO: don't hardcode
 
 local function starts_with(str, start)
 	if not str or not start then
@@ -167,7 +175,23 @@ function gadget:Initialize()
 			end
 		end
 	end
+	GetClosestPylonInGrid = GG.GetClosestPylonInGrid
+	SetPriorityState = GG.SetPriorityState
+
 	ai_lib_Initialize()
+end
+
+local function getOneDistLengthTowardsUnit(dist, unitId1, unitId2) -- TODO: move to utils
+	local x1, _, z1 = spGetUnitPosition(unitId1)
+	local x2, _, z2 = spGetUnitPosition(unitId2)
+	Spring.MarkerAddPoint ( x1, 100, z1,"u1", true)
+	Spring.MarkerAddPoint ( x2, 100, z2,"u2", true)
+	printThing("unit Positions", {u1={x1, z1}, u2={x2,z2}})
+	printThing("dist", dist)
+	local v = unitVec({x2 - x1, z2 - z1})
+	printThing("v", v)
+	Spring.MarkerAddPoint ( x1 + v[1] * dist, 100, z1 + v[2] * dist,"v", true)
+	return x1 + v[1] * dist, z1 + v[2] * dist
 end
 
 local function buildCloseTo(unitId, buildId, x, y, z)
@@ -184,7 +208,8 @@ local function buildCloseTo(unitId, buildId, x, y, z)
 		i = i + 1
 	end
 	if i > 100 then
-		Echo("ERROR! Could not place building!")
+		Echo("ERROR! Could not place building! " .. tostring(buildId))
+		Spring.MarkerAddPoint ( x, y, z,tostring(buildId), true)
 	end
 	spGiveOrderToUnit(unitId, -buildId, {xx, yy, zz, 0}, {shift=true})
 	return xx, yy, zz
@@ -300,6 +325,62 @@ local function tryClaimNearestMex(teamId, unitId)
 	return false
 end
 
+local function getClosestUngriddedMex(teamId, x, y, z)
+	local mexes = spGetTeamUnitsByDefs(teamId, mexDefID)
+	local maxOverdriveFactor = 0
+	local mexData = {}
+	local mexNum = 0
+	for _, mexId in pairs(mexes) do
+		--local mexMetal, _,_,_ = spGetUnitResources(mexId)
+		local totalMexMetal = (spGetUnitRulesParam(mexId, "current_metalIncome") or 0)
+		local eDrain = (spGetUnitRulesParam(mexId, "overdrive_energyDrain") or 0)
+		local mexMetal = totalMexMetal / (1 + sqrt(eDrain)/4)
+		Echo("mexMetal")
+		Echo(mexMetal)
+		Echo("eDrain")
+		Echo(eDrain)
+		local overDriveFactor = eDrain / mexMetal
+		if mexMetal == 0 then
+			overDriveFactor = 0
+		end
+		if maxOverdriveFactor < overDriveFactor then
+			maxOverdriveFactor = overDriveFactor
+		end
+
+		mexNum = mexNum + 1
+		local mx, my, mz = spGetUnitPosition(mexId)
+		local dx, dz = x - mx, z - mz
+		local dist = dx*dx + dz*dz
+		mexData[mexNum] = {
+			id = mexId,
+			dist = dist,
+			overDriveFactor = overDriveFactor
+		}
+	end
+	local maxMexData = {}
+	local numMaxMex = 1
+	for mexArrId, mexDatum in pairs(mexData) do
+		if mexDatum.overDriveFactor == maxOverdriveFactor then
+			maxMexData[numMaxMex] = {
+				id = mexDatum.id,
+				dist = mexDatum.dist
+			}
+			mexData[mexArrId].dist = 99999999
+			numMaxMex = numMaxMex + 1
+		end
+	end
+	table.sort(mexData, function (k1, k2) return k1.dist < k2.dist end )
+	table.sort(maxMexData, function (k1, k2) return k1.dist < k2.dist end )
+	printThing("mexData", mexData)
+	printThing("maxMexData", maxMexData)
+	return mexData[1].id, maxMexData[1].id
+end
+
+local function GetClosestPylonInGridToUnit(pylonId, unitId)
+	local x, y, z = spGetUnitPosition(unitId)
+	return GetClosestPylonInGrid(pylonId, x, z)
+end
+
 local function conRoleOrders(teamId, unitId, thisTeamData)
 	-- Keep existing orders
 	if spGetUnitCommands(unitId, 0) > 0 then
@@ -311,16 +392,28 @@ local function conRoleOrders(teamId, unitId, thisTeamData)
 	--Echo(role)
 	local x, y, z = spGetUnitPosition(unitId)
 	if role == GRIDDER then
-		-- TODO
-		-- TODO
-		-- TODO
-		-- TODO
-		-- TODO
-		-- local mexId = getClosestUngriddedMex(teamId, x, y, z)
-		-- local pylonId = getClosestPylonToMex(mexId)
-		-- local pylonRadius = thePylonRadius
-		-- local x, y, z = getOneDistLengthTowardsUnit(pylonRadius*2,pylonId, mexId)
-		buildOrAssistCloseTo(unitId, pylonDefID, teamId, x + 100, y, z - 50, 300)
+		--TODO
+		local ungridMexId, maxGridMexId = getClosestUngriddedMex(teamId, x, y, z)
+		if ungridMexId == maxGridMexId then -- In this case we're E-stalling
+			buildOrAssistCloseTo(unitId, solarDefID, teamId, x + 100, y, z - 50, 200)
+		else
+			Echo("ungridMexId")
+			local x1, y1, z1 = spGetUnitPosition(ungridMexId)
+			Spring.MarkerAddPoint ( x1, y1, z1,"ungridMexId", true)
+			Echo(ungridMexId)
+			Echo("maxGridMexId")
+			local x2, y2, z2 = spGetUnitPosition(maxGridMexId)
+			Spring.MarkerAddPoint ( x2, y2, z2,"maxGridMexId", true)
+			Echo(maxGridMexId) -- TODO: Why 1?
+			local ungridPylonId, destPylonRadius = GetClosestPylonInGridToUnit(ungridMexId, maxGridMexId)
+			local gridPylonId, sourcePylonRadius = GetClosestPylonInGridToUnit(maxGridMexId, ungridMexId)
+			local xx, zz = getOneDistLengthTowardsUnit(sourcePylonRadius + pylonRadius + destPylonRadius - 70,gridPylonId, ungridPylonId)
+			local yy = max(0, spGetGroundHeight(xx, zz))
+			-- TODO: terraform if needed for pylons
+			buildOrAssistCloseTo(unitId, pylonDefID, teamId, xx, yy, zz, 70)
+		end
+
+		--buildOrAssistCloseTo(unitId, pylonDefID, teamId, x + 100, y, z - 50, 300)
 	elseif role == MEXER then
 		tryClaimNearestMex(teamId, unitId)
 	elseif role == E_MAKER then
@@ -367,7 +460,7 @@ local function newConRoles(unitId, thisTeamData)
 		end
 		printThing("thisTeamData.conRoles", thisTeamData.conRoles)
 		local x, y, z = spGetUnitPosition(unitId)
-		Spring.MarkerAddPoint ( x, y, z, thisTeamData.conRoles[unitId], true)
+		--Spring.MarkerAddPoint ( x, y, z, thisTeamData.conRoles[unitId], true)
 	end
 end
 
@@ -387,13 +480,12 @@ local function startAreaConOrders(teamId, unitId)
 	end
 end
 
-local function newWelderOrders(teamId, unitId, thisTeamData)
+local function newConOrders(teamId, unitId, thisTeamData)
 	startAreaConOrders(teamId, unitId)
 	conRoleOrders(teamId, unitId, thisTeamData)
 end
 
-
-local function oldWelderOrders(teamId, cmdQueue, unitId, thisTeamData)
+local function oldConOrders(teamId, cmdQueue, unitId, thisTeamData)
 	local facs = spGetTeamUnitsByDefs(teamId, cloakfacDefID)
 	local x, y, z = spGetUnitPosition(unitId)
 	-- Rebuild fac
@@ -468,6 +560,27 @@ local function populateMexBuildClaimList(teamId, teamData)
 	teamData.mexBuildOwners = teamMexBuildOwners
 end
 
+local ecoBuildings = {mexDefID, solarDefID, fusionDefID, singuDefID}
+local function adjustEcoPriorities(teamId)
+	for _, unitDefID in ipairs(ecoBuildings) do
+		local buildingToHighPriority = -1
+		local bestPercentageComplete = -1
+		for _, unitID in ipairs(spGetTeamUnitsByDefs ( teamId, unitDefID )) do
+			local _, _, _, _, buildProgress = spGetUnitHealth(unitID)
+			if buildProgress < 1 then
+				if buildProgress > bestPercentageComplete then
+					bestPercentageComplete = buildProgress
+					buildingToHighPriority = unitID
+				end
+			end
+		end
+		if buildingToHighPriority > 0 then
+			local x,y,z = spGetUnitPosition(buildingToHighPriority)
+			SetPriorityState(buildingToHighPriority, 2, CMD_PRIORITY)
+		end
+	end
+end
+
 function gadget:GameFrame(frame)
 	if not gadgetHandler:IsSyncedCode() then
 		return
@@ -483,6 +596,8 @@ function gadget:GameFrame(frame)
 				end
 			end
 		else
+			GG.SetEnergyReserved(teamId, 50)
+			GG.SetMetalReserved(teamId, 50)
 			populateMexBuildClaimList(teamId, data)
 			updateRoleList(data)
 			-- Constructors and factories
@@ -496,14 +611,14 @@ function gadget:GameFrame(frame)
 							factoryOrders(teamId, unitId, frame)
 						else
 							-- Constructors
-							oldWelderOrders(teamId, cmdQueue, unitId, thisTeamData)
+							oldConOrders(teamId, cmdQueue, unitId, thisTeamData)
 						end
 					end
 				else
 					if unitDef == cloakfacDefID then
 					else
 						-- Orders for under construction cons
-						newWelderOrders(teamId, unitId, thisTeamData)
+						newConOrders(teamId, unitId, thisTeamData)
 						newConRoles(unitId, thisTeamData)
 					end
 				end
@@ -517,6 +632,9 @@ function gadget:GameFrame(frame)
 					spGiveOrderToUnit(unitId, CMD.PATROL, {x+100, y, z+100}, 0)
 				end
 			end
+		end
+		if frame%5 then
+			adjustEcoPriorities(teamId)
 		end
 	end
 	ai_lib_GameFrame(frame)
