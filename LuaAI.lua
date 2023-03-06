@@ -52,6 +52,10 @@ return {
     desc = 'Maybe it will win?'
   },
   {
+    name = 'MyFirstAI (Hard)',
+    desc = 'Maybe it will win?'
+  },
+  {
 	name ='Null AI',
 	desc = 'Empty AI for testing purposes'
   }
