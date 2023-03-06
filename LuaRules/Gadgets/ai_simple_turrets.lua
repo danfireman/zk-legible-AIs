@@ -1033,7 +1033,7 @@ local function retreatPos(startpos)
 	return xx, yy, zz
 end
 
-local function newConOrders(teamId, unitId, data)
+local function newWelderOrders(teamId, unitId, data)
 	local current, storage, _, income = spGetTeamResources(teamId, "metal")
 	local facs = spGetTeamUnitsByDefs(teamId, tankfacDefID)
 	local x, y, z = spGetUnitPosition(unitId)
@@ -1096,7 +1096,7 @@ local function newConOrders(teamId, unitId, data)
 	end
 end
 
-local function oldConOrders(teamId, cmdQueue, unitId, thisTeamData)
+local function oldWelderOrders(teamId, cmdQueue, unitId, thisTeamData)
 	local facs = spGetTeamUnitsByDefs(teamId, tankfacDefID)
 	local x, y, z = spGetUnitPosition(unitId)
 	-- Rebuild fac
@@ -1123,7 +1123,7 @@ local function oldConOrders(teamId, cmdQueue, unitId, thisTeamData)
 
 	if sqDistance(x,z, startpos[1], startpos[2]) < 1000000 then
 		Echo("new con orders")
-		newConOrders(teamId, unitId, thisTeamData)
+		newWelderOrders(teamId, unitId, thisTeamData)
 	end
 	local adjustdX, adjustedZ = x + math.random(-100, 100), z + math.random(-100, 100) -- Slight bunching reduction
 	local spot = GetClosestBuildableMetalSpot(adjustdX, adjustedZ, teamId)
@@ -1254,12 +1254,12 @@ function gadget:GameFrame(frame) -- TODO: Why called twice?!?!
 							factoryOrders(teamId, unitId, frame)
 						else
 							-- Constructors
-							oldConOrders(teamId, cmdQueue, unitId, thisTeamData)
+							oldWelderOrders(teamId, cmdQueue, unitId, thisTeamData)
 						end
 					end
 				else
 					-- Orders for under construction welders
-					newConOrders(teamId, unitId, thisTeamData)
+					newWelderOrders(teamId, unitId, thisTeamData)
 				end
 			end
 			for _,unitId in ipairs(spGetTeamUnitsByDefs(teamId, blitzDefID)) do
