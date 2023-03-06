@@ -12,11 +12,14 @@ function gadget:GetInfo()
 end
 ------------------------------------------------------------
 -- TODO 
--- High priority mexes and solars, use a reserve
 
 -- Consider current E plus under construction E
--- Make grid
+-- Make mexers in proportion to how many remaining empty mexespots there are and current E production
 -- Move build close to to lib
+-- No duplicate pylons
+-- gridders should separate
+-- Don't make things close enough to chainsplode
+-- terraform pylon spots
 
 
 include("LuaRules/Configs/customcmds.h.lua")
@@ -72,6 +75,7 @@ local spGetTeamRulesParam = Spring.GetTeamRulesParam
 local spGetUnitIsDead = Spring.GetUnitIsDead
 local spGetUnitResources = Spring.GetUnitResources
 local spGetUnitRulesParam = Spring.GetUnitRulesParam
+local spGetGameFrame = Spring.GetGameFrame
 
 local unitVec = Spring.Utilities.Vector.Unit
 
@@ -186,24 +190,29 @@ local function getOneDistLengthTowardsUnit(dist, unitId1, unitId2) -- TODO: move
 	local x2, _, z2 = spGetUnitPosition(unitId2)
 	Spring.MarkerAddPoint ( x1, 100, z1,"u1", true)
 	Spring.MarkerAddPoint ( x2, 100, z2,"u2", true)
-	printThing("unit Positions", {u1={x1, z1}, u2={x2,z2}})
-	printThing("dist", dist)
+	--printThing("unit Positions", {u1={x1, z1}, u2={x2,z2}})
+	--printThing("dist", dist)
 	local v = unitVec({x2 - x1, z2 - z1})
-	printThing("v", v)
+	--printThing("v", v)
 	Spring.MarkerAddPoint ( x1 + v[1] * dist, 100, z1 + v[2] * dist,"v", true)
 	return x1 + v[1] * dist, z1 + v[2] * dist
 end
 
 local function buildCloseTo(unitId, buildId, x, y, z)
-	local xx = x
+	local xx = x - 10
 	local yy = y
-	local zz = z
+	local zz = z - 10
 	local i = 0
+	local maxDist = 10
 	while (spTestBuildOrder(buildId, xx, yy, zz, 0) == 0) and i < 10000 do
-		local signx = (i%2 * 2) - 1
-		local signz = (floor(i/2)%2 * 2) - 1
-		xx = x + 10 * (i % 100) * signx
-		zz = z + 10 * (floor(i/100) % 100) * signz
+		xx = xx + 10
+		if xx > xx + maxDist then
+			if yy > yy + maxDist then
+				maxDist = maxDist + 10
+				yy = y - maxDist
+			end
+			xx = xx - maxDist
+		end
 		yy = max(0, spGetGroundHeight(xx, zz))
 		i = i + 1
 	end
@@ -221,29 +230,53 @@ local function assistBuild(conId, unitToConsiderId)
 	spGiveOrderToUnit(conId, -buildDefId, {xx, yy, zz, 0}, {shift=true})
 end
 
+local function isBuildingUnitDef(conId, buildId)
+	local cmdQueue = spGetUnitCommands(conId, 2)
+	for _,cmd in ipairs(cmdQueue) do
+		if cmd.id == -buildId then
+			return {cmd.params[1],cmd.params[2],cmd.params[3], cmd.params[4]}
+		end
+	end
+	return nil
+end
+
 local function buildOrAssistCloseTo(unitId, buildId, teamId, x, y, z, maxAssistRange)
 	local unitsToConsider
+	local consToConsider = {}
 	if maxAssistRange == nil or maxAssistRange == -1 then
 		unitsToConsider = spGetTeamUnitsByDefs (teamId, buildId)
 	else
 		local allTypesUnitsToConsider = spGetUnitsInCylinder (x, z, maxAssistRange, teamId )
 		unitsToConsider = {}
 		local i = 1
+		local consNum = 1
 		for _,unitToConsiderId in ipairs(allTypesUnitsToConsider) do
 			local unitDefId = spGetUnitDefID(unitToConsiderId)
 			if unitDefId == buildId then
 				unitsToConsider[i] = unitToConsiderId
 				i = i + 1
 			end
+			if conDefs[unitDefId] then
+				consToConsider[consNum] = unitToConsiderId
+				consNum = consNum + 1
+			end
 		end
 	end
 	for _,unitToConsiderId in ipairs(unitsToConsider) do
 		local build = select(5, spGetUnitHealth(unitToConsiderId))
 		if build and build < 1 then
-			assistBuild(unitId, unitToConsiderId)  -- TODO
+			assistBuild(unitId, unitToConsiderId)
 			return
 		end
 	end
+	for _,conToConsiderId in ipairs(consToConsider) do
+		local buildingPosition = isBuildingUnitDef(conToConsiderId, buildId)
+		if buildingPosition then
+			spGiveOrderToUnit(unitId, -buildId, buildingPosition, {shift=true})
+			return
+		end
+	end
+
 	buildCloseTo(unitId, buildId, x, y, z)
 end
 
@@ -306,17 +339,17 @@ local function tryClaimNearestMex(teamId, unitId)
 	else
 		local cmdQueue = spGetUnitCommands(unitId, 2)
 		if (#cmdQueue == 0) then
-			printThing("mexBuildOwners", mexBuildOwners)
+			--printThing("mexBuildOwners", mexBuildOwners)
 			for i,spotData in ipairs(spots) do
 				local spot = spotData.bestSpot
 				local spotKey = tostring(spot.x) .. "_" .. tostring(spot.z)
 				if not mexBuildOwners[spotKey] then
-					Echo("Found unclaimed mex " .. spotKey)
+					--Echo("Found unclaimed mex " .. spotKey)
 					local xx = spot.x
 					local zz = spot.z
 					local yy = max(0, spGetGroundHeight(xx, zz))
 					HandleAreaMex(nil, xx, yy, zz, 100, {alt=false}, {unitId})
-					Echo("Claimed mex " .. spotKey)
+					--Echo("Claimed mex " .. spotKey)
 					return true
 				end
 			end
@@ -335,10 +368,6 @@ local function getClosestUngriddedMex(teamId, x, y, z)
 		local totalMexMetal = (spGetUnitRulesParam(mexId, "current_metalIncome") or 0)
 		local eDrain = (spGetUnitRulesParam(mexId, "overdrive_energyDrain") or 0)
 		local mexMetal = totalMexMetal / (1 + sqrt(eDrain)/4)
-		Echo("mexMetal")
-		Echo(mexMetal)
-		Echo("eDrain")
-		Echo(eDrain)
 		local overDriveFactor = eDrain / mexMetal
 		if mexMetal == 0 then
 			overDriveFactor = 0
@@ -360,19 +389,19 @@ local function getClosestUngriddedMex(teamId, x, y, z)
 	local maxMexData = {}
 	local numMaxMex = 1
 	for mexArrId, mexDatum in pairs(mexData) do
-		if mexDatum.overDriveFactor == maxOverdriveFactor then
+		if mexDatum.overDriveFactor >= maxOverdriveFactor - 0.2 then -- Very differences in overdrive don't matter
 			maxMexData[numMaxMex] = {
 				id = mexDatum.id,
 				dist = mexDatum.dist
 			}
-			mexData[mexArrId].dist = 99999999
+			mexData[mexArrId].dist = mexData[mexArrId].dist + 99999999
 			numMaxMex = numMaxMex + 1
 		end
 	end
 	table.sort(mexData, function (k1, k2) return k1.dist < k2.dist end )
 	table.sort(maxMexData, function (k1, k2) return k1.dist < k2.dist end )
-	printThing("mexData", mexData)
-	printThing("maxMexData", maxMexData)
+	--printThing("mexData", mexData)
+	--printThing("maxMexData", maxMexData)
 	return mexData[1].id, maxMexData[1].id
 end
 
@@ -380,6 +409,8 @@ local function GetClosestPylonInGridToUnit(pylonId, unitId)
 	local x, y, z = spGetUnitPosition(unitId)
 	return GetClosestPylonInGrid(pylonId, x, z)
 end
+
+local gridConJobHunting = {}
 
 local function conRoleOrders(teamId, unitId, thisTeamData)
 	-- Keep existing orders
@@ -392,25 +423,27 @@ local function conRoleOrders(teamId, unitId, thisTeamData)
 	--Echo(role)
 	local x, y, z = spGetUnitPosition(unitId)
 	if role == GRIDDER then
-		--TODO
 		local ungridMexId, maxGridMexId = getClosestUngriddedMex(teamId, x, y, z)
 		if ungridMexId == maxGridMexId then -- In this case we're E-stalling
 			buildOrAssistCloseTo(unitId, solarDefID, teamId, x + 100, y, z - 50, 200)
 		else
-			Echo("ungridMexId")
-			local x1, y1, z1 = spGetUnitPosition(ungridMexId)
-			Spring.MarkerAddPoint ( x1, y1, z1,"ungridMexId", true)
-			Echo(ungridMexId)
-			Echo("maxGridMexId")
-			local x2, y2, z2 = spGetUnitPosition(maxGridMexId)
-			Spring.MarkerAddPoint ( x2, y2, z2,"maxGridMexId", true)
-			Echo(maxGridMexId) -- TODO: Why 1?
-			local ungridPylonId, destPylonRadius = GetClosestPylonInGridToUnit(ungridMexId, maxGridMexId)
-			local gridPylonId, sourcePylonRadius = GetClosestPylonInGridToUnit(maxGridMexId, ungridMexId)
-			local xx, zz = getOneDistLengthTowardsUnit(sourcePylonRadius + pylonRadius + destPylonRadius - 70,gridPylonId, ungridPylonId)
-			local yy = max(0, spGetGroundHeight(xx, zz))
-			-- TODO: terraform if needed for pylons
-			buildOrAssistCloseTo(unitId, pylonDefID, teamId, xx, yy, zz, 70)
+			if gridConJobHunting[unitId] and gridConJobHunting[unitId] + TEAM_SLOWUPDATE_RATE < spGetGameFrame() then -- Don't look for a new job on the first few frames after finishing to wait for grid reconnect
+				local x1, y1, z1 = spGetUnitPosition(ungridMexId)
+				Spring.MarkerAddPoint ( x1, y1, z1,"ungridMexId", true)
+				local x2, y2, z2 = spGetUnitPosition(maxGridMexId)
+				Spring.MarkerAddPoint ( x2, y2, z2,"maxGridMexId", true)
+				local ungridPylonId, destPylonRadius = GetClosestPylonInGridToUnit(ungridMexId, maxGridMexId)
+				local gridPylonId, sourcePylonRadius = GetClosestPylonInGridToUnit(maxGridMexId, ungridMexId)
+				local xx, zz = getOneDistLengthTowardsUnit(sourcePylonRadius + pylonRadius + destPylonRadius - 100,gridPylonId, ungridPylonId)
+				local yy = max(0, spGetGroundHeight(xx, zz))
+				-- TODO: terraform if needed for pylons
+				buildOrAssistCloseTo(unitId, pylonDefID, teamId, xx, yy, zz, 70)
+				gridConJobHunting[unitId] = nil
+			else
+				if not gridConJobHunting[unitId] then
+					gridConJobHunting[unitId] = spGetGameFrame()
+				end
+			end
 		end
 
 		--buildOrAssistCloseTo(unitId, pylonDefID, teamId, x + 100, y, z - 50, 300)
@@ -422,7 +455,7 @@ local function conRoleOrders(teamId, unitId, thisTeamData)
 			HandleAreaMex(nil, x, y, z, 600, {alt=true, ctrl=true}, {unitId}, false)
 			local cmdQueue = spGetUnitCommands(unitId, 2)
 			if #cmdQueue == 0 then
-				buildOrAssistCloseTo(unitId, solarDefID, teamId, x + 100, y, z - 50, 300)
+				buildOrAssistCloseTo(unitId, solarDefID, teamId, x + 100, y, z - 150, 300)
 				Echo("solar")
 			end
 		else
@@ -451,7 +484,7 @@ local function newConRoles(unitId, thisTeamData)
 		elseif thisTeamData.numEMakers < 4 then
 			thisTeamData.conRoles[unitId] = E_MAKER
 			thisTeamData.numEMakers = thisTeamData.numEMakers + 1
-		elseif thisTeamData.numGridders < 2 then
+		elseif thisTeamData.numGridders * 6 < thisTeamData.numEMakers - 2 then
 			thisTeamData.conRoles[unitId] = GRIDDER
 			thisTeamData.numGridders = thisTeamData.numGridders + 1
 		else
@@ -560,23 +593,26 @@ local function populateMexBuildClaimList(teamId, teamData)
 	teamData.mexBuildOwners = teamMexBuildOwners
 end
 
-local ecoBuildings = {mexDefID, solarDefID, fusionDefID, singuDefID}
+local ecoBuildings = {mexDefID, solarDefID, fusionDefID, singuDefID, pylonDefID}
 local function adjustEcoPriorities(teamId)
 	for _, unitDefID in ipairs(ecoBuildings) do
-		local buildingToHighPriority = -1
-		local bestPercentageComplete = -1
-		for _, unitID in ipairs(spGetTeamUnitsByDefs ( teamId, unitDefID )) do
-			local _, _, _, _, buildProgress = spGetUnitHealth(unitID)
-			if buildProgress < 1 then
-				if buildProgress > bestPercentageComplete then
-					bestPercentageComplete = buildProgress
-					buildingToHighPriority = unitID
+		local unitsOfType = spGetTeamUnitsByDefs ( teamId, unitDefID )
+		if (not (unitDefID == singuDefID)) or #unitsOfType > 1 then
+			local buildingToHighPriority = -1
+			local bestPercentageComplete = -1
+			for _, unitID in ipairs(unitsOfType) do
+				local _, _, _, _, buildProgress = spGetUnitHealth(unitID)
+				if buildProgress < 1 then
+					if buildProgress > bestPercentageComplete then
+						bestPercentageComplete = buildProgress
+						buildingToHighPriority = unitID
+					end
 				end
 			end
-		end
-		if buildingToHighPriority > 0 then
-			local x,y,z = spGetUnitPosition(buildingToHighPriority)
-			SetPriorityState(buildingToHighPriority, 2, CMD_PRIORITY)
+			if buildingToHighPriority > 0 then
+				local x,y,z = spGetUnitPosition(buildingToHighPriority)
+				SetPriorityState(buildingToHighPriority, 2, CMD_PRIORITY)
+			end
 		end
 	end
 end

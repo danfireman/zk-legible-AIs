@@ -794,7 +794,7 @@ local camDir
 local debounceCamUpdate
 local incomeLabelList
 local DrawIncomeLabels
-function theUpdate()
+function theUpdate() -- global so that it can be referenced above
     ai_lib_Initialize()
 
     if firstUpdate then
