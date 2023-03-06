@@ -16,7 +16,14 @@ end
 -- deal with dead fac
 -- Ensure fac gets lotus
 -- Don't excess
+-- Dedup fusion
 ------------------------------------------------------------
+-- Other strats:
+-- Cloak
+-- 1 con naked expand and 1 con 4 solars
+-- Glaive swarm rampages, avoid enemy unless overwhelm
+------------------------------------------------------------
+
 
 include("LuaRules/Configs/customcmds.h.lua")
 include("LuaRules/Configs/constants.lua")
@@ -979,27 +986,32 @@ local function isBeingBuilt(unitId)
 	return buildProgress < 1
 end
 
-local hard = true
 local startpos = {}
+local function placeFac(facDefID, teamId)
+	local data = teamdata[teamId]
+	if Spring.GetTeamUnitDefCount(teamId, facDefID) == 0 then
+		for unitId,_ in pairs(data.cons) do
+			local x, y, z = Spring.GetUnitPosition(unitId)
+			local xx = x - 100
+			local zz = z
+			local yy = math.max(0, Spring.GetGroundHeight(xx, zz))
+			buildCloseTo(unitId, facDefID, xx, yy, zz)
+			data.startpos = {xx, zz}
+			--startpos = {xx, zz}
+			--printThing("startpos", thisTeamData.startpos, "")
+			--printThing("teamdata", thisTeamData, "")
+			printThing("teamdataAll", teamdata, "")
+			Spring.SendLuaRulesMsg('sethaven|' .. xx .. '|' .. yy .. '|' .. zz )
+		end
+	end
+end
+
+local hard = true
 function gadget:GameFrame(frame)
     for teamId, data in pairs(teamdata) do
 		local thisTeamData = teamdata[teamId]
 		if frame < 5 then
-			if Spring.GetTeamUnitDefCount(teamId, tankfacDefID) == 0 then
-				for unitId,_ in pairs(data.cons) do
-					local x, y, z = Spring.GetUnitPosition(unitId)
-					local xx = x - 100
-					local zz = z
-					local yy = math.max(0, Spring.GetGroundHeight(xx, zz))
-					buildCloseTo(unitId, tankfacDefID, xx, yy, zz)
-					teamdata[teamId].startpos = {xx, zz}
-					startpos = {xx, zz}
-					printThing("startpos", thisTeamData.startpos, "")
-					printThing("teamdata", thisTeamData, "")
-					printThing("teamdataAll", teamdata, "")
-					Spring.SendLuaRulesMsg('sethaven|' .. xx .. '|' .. yy .. '|' .. zz )
-				end
-			end
+			placeFac(tankfacDefID, teamId)
 		else
 			-- Constructors and factories
 			for unitId,_ in pairs(data.cons) do
@@ -1083,7 +1095,7 @@ function gadget:GameFrame(frame)
 						local yy = math.max(0, Spring.GetGroundHeight(xx, zz))
 
 						buildCloseTo(unitId, storageDefID, xx, yy, zz)
-					elseif (spGetTeamUnitDefCount(teamId, welderDefID) > 3) and (current > 300) then -- now sure why this is needed, but autoassist doesn't always work
+					elseif (spGetTeamUnitDefCount(teamId, welderDefID) > 3) and (current > 300) then -- not sure why this is needed, but autoassist doesn't always work
 						-- Assist fac
 						for _,facId in ipairs(spGetTeamUnitsByDefs(teamId, tankfacDefID)) do
 							spGiveOrderToUnit(unitId, 25, {facId}, {right=true, coded=16})
@@ -1106,16 +1118,25 @@ function gadget:GameFrame(frame)
 					if (#cmdQueue == 0) then
 						local x, y, z = Spring.GetUnitPosition(unitId)
 						--local startPosDist = Distance(x,z, thisTeamData.startpos[1], thisTeamData.startpos[2])
-						local startPosDist = Distance(x,z, startpos[1], startpos[2])
-						if startPosDist > 100000 or (health > maxhealth * 0.95) then
-							local enemyUnit = spGetUnitNearestEnemy(unitId, 9999, true)
-							--local xx, yy, zz = Game.mapSizeX - thisTeamData.startpos[1], 0, Game.mapSizeZ - thisTeamData.startpos[2]
-							local xx, yy, zz = Game.mapSizeX - startpos[1], 0, Game.mapSizeZ - startpos[2]
-							yy = math.max(0, Spring.GetGroundHeight(xx, zz))
-							if enemyUnit then
-								xx, yy, zz = Spring.GetUnitPosition(enemyUnit)
+						local startpos = data.startpos
+						if startpos then
+							local startPosDist = Distance(x,z, startpos[1], startpos[2])
+							if startPosDist > 100000 or (health > maxhealth * 0.95) then
+								local enemyUnit = spGetUnitNearestEnemy(unitId, 9999, true)
+								--local xx, yy, zz = Game.mapSizeX - thisTeamData.startpos[1], 0, Game.mapSizeZ - thisTeamData.startpos[2]
+								local xx, yy, zz = Game.mapSizeX - startpos[1], 0, Game.mapSizeZ - startpos[2]
+								yy = math.max(0, Spring.GetGroundHeight(xx, zz))
+								if enemyUnit then
+									xx, yy, zz = Spring.GetUnitPosition(enemyUnit)
+								end
+								spGiveOrderToUnit(unitId, CMD.FIGHT, {xx, yy, zz}, 0)
 							end
-							spGiveOrderToUnit(unitId, CMD.FIGHT, {xx, yy, zz}, 0)
+						else
+							Echo("No startpos :(")
+							local xx = math.random(1, Game.mapSizeX)
+							local zz = math.random(1, Game.mapSizeZ)
+							local yy = math.max(0, Spring.GetGroundHeight(xx, zz))
+							spGiveOrderToUnit(unitId, CMD.FIGHT, {xx, 0, zz}, 0)
 						end
 					end
 					if hard then
@@ -1130,9 +1151,17 @@ function gadget:GameFrame(frame)
 							--printThing("startpos1", thisTeamData.startpos[1], "")
 							-- TODO: Pick better pos
 							--local xx, yy, zz = thisTeamData.startpos[1] - 100, 0, thisTeamData.startpos[2]
-							local xx, yy, zz = startpos[1] - 100, 0, startpos[2]
-							yy = math.max(0, Spring.GetGroundHeight(xx, zz))
-							spGiveOrderToUnit(unitId, CMD.MOVE, {xx, yy, zz}, 0)
+							local startpos = data.startpos
+							if startpos then
+								local xx, yy, zz = startpos[1] - 100, 0, startpos[2]
+								yy = math.max(0, Spring.GetGroundHeight(xx, zz))
+								spGiveOrderToUnit(unitId, CMD.MOVE, {xx, yy, zz}, 0)
+							else
+								Echo("No startpos :((")
+								printThing("data", data, "")
+								printThing("thisTeamData", thisTeamData, "")
+								printThing("teamdata", teamdata, "")
+							end
 						end
 					end
 				end
