@@ -83,6 +83,21 @@ local pregame = true
 local placedMexSinceShiftPressed = false
 
 ------------------------------------------------------------
+-- Debug
+------------------------------------------------------------
+local function printThing(theKey, theTable, indent)
+    indent = indent or ""
+    if (type(theTable) == "table") then
+        Spring.Echo(indent .. theKey .. ":")
+        for a, b in pairs(theTable) do
+            printThing(tostring(a), b, indent .. "  ")
+        end
+    else
+        Spring.Echo(indent .. theKey .. ": " .. tostring(theTable))
+    end
+end
+
+------------------------------------------------------------
 -- Config
 ------------------------------------------------------------
 
@@ -454,7 +469,7 @@ local function MakeOptions()
 end
 
 Spring.Echo("loading local mex placer")
-local function HandleAreaMex(cmdID, cx, cy, cz, cr, cmdOpts, units)
+local function HandleAreaMex(cmdID, cx, cy, cz, cr, cmdOpts, units, makeLotus)
     --Spring.Echo("Handling area mex")
     local xmin = cx-cr
     local xmax = cx+cr
@@ -573,7 +588,7 @@ local function HandleAreaMex(cmdID, cx, cy, cz, cr, cmdOpts, units)
                 local xx = x + addons[myOctants[teamId]][1][1] * 2
                 local zz = z + addons[myOctants[teamId]][1][2] * 2
                 local yy = math.max(0, Spring.GetGroundHeight(xx, zz))
-                if not (Spring.TestBuildOrder(lotusDefID, xx, yy, zz, 0) == 0) then
+                if not (Spring.TestBuildOrder(lotusDefID, xx, yy, zz, 0) == 0) and makeLotus then
                     commandArrayToIssue[#commandArrayToIssue+1] = {-lotusDefID, {xx,yy,zz,0} }
                 end
             end
@@ -586,6 +601,8 @@ local function HandleAreaMex(cmdID, cx, cy, cz, cr, cmdOpts, units)
                 spGiveOrderToUnit(unitId, command[1], command[2], {alt=true, shift=true})
             end
         end
+        --printThing("unitArrayToReceive", unitArrayToReceive)
+        --printThing("commandArrayToIssue", commandArrayToIssue)
     end
 
     return true

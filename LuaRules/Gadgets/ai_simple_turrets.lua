@@ -348,7 +348,7 @@ local function oldWelderOrders(teamId, cmdQueue, unitId, thisTeamData)
 		local zz = spot.z
 		local yy = max(0, spGetGroundHeight(xx, zz))
 
-		HandleAreaMex(nil, xx, yy, zz, 100, {alt=true}, {unitId})
+		HandleAreaMex(nil, xx, yy, zz, 100, {alt=true}, {unitId}, true)
 		cmdQueue = spGetUnitCommands(unitId, 2)
 		if (#cmdQueue == 0) then
 			local startX,startY = thisTeamData.startpos
